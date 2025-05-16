@@ -17,6 +17,12 @@ export interface Tile {
   decoration?: Decoration;
 }
 
+export interface CreaturePixel {
+  x: number;
+  y: number;
+  color: string;
+}
+
 export interface Creature {
   id: string;
   type: CreatureType;
@@ -31,6 +37,13 @@ export interface Creature {
   lastInteraction: number;
   evolutionStage: EvolutionStage;
   tools: Tool[];
+  greetingType: 'none' | 'salutx1' | 'salutx2';
+  pattern: CreaturePattern;
+  pixels?: CreaturePixel[];
+  width: number;
+  height: number;
+  interactions?: CreatureInteraction[];
+  happiness: number;
 }
 
 export enum Direction {
@@ -108,6 +121,8 @@ export interface WorldState {
   creatures: Creature[];
   evolutionLevel: number;
   connections: number;
+  fountains: Array<{ x: number; y: number }>;
+  pinkTrees: Array<{ x: number; y: number }>;
 }
 
 export interface GameContextType {
@@ -115,4 +130,32 @@ export interface GameContextType {
   selectedCreature: Creature | null;
   setSelectedCreature: (creature: Creature | null) => void;
   handleTileClick: (x: number, y: number) => void;
+}
+
+export interface Fountain {
+  x: number;
+  y: number;
+  state: 1 | 2 | 3 | 4; // 1: normal, 2: plus d'eau, 3: encore plus d'eau, 4: débordement
+}
+
+export type CreaturePattern = 'default' | 'striped' | 'rainbow';
+
+export type FoodType = 'apple' | 'yellowflower' | 'pinkflower' | 'rainbowflower';
+
+export interface Food {
+  type: FoodType;
+  name: string;
+  image: string;
+  effect: {
+    color?: string;
+    pattern?: CreaturePattern;
+    evolution?: number;
+    happiness: number;
+  };
+}
+
+export interface CreatureInteraction {
+  type: 'feed';
+  food: FoodType;
+  timestamp: number;
 }

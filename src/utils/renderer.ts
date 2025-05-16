@@ -1,4 +1,4 @@
-import { Creature, Tile, BiomeType, EvolutionStage } from '../types';
+import { Creature, Tile, BiomeType, EvolutionStage, CreatureState } from '../types';
 import { cartesianToIsometric } from './isometric';
 
 const TILE_WIDTH = 64;
@@ -11,6 +11,7 @@ const biomeColors = {
   [BiomeType.River]: '#58c1dd',
   [BiomeType.Clearing]: '#b8e3a8',
   [BiomeType.Edge]: '#a68f7c',
+  'grass': '#70e1c8',
 };
 
 const decorationColors = {
@@ -33,7 +34,7 @@ export function renderTile(
 ) {
   const { isoX, isoY } = cartesianToIsometric(tile.x, tile.y);
   const x = offsetX + isoX;
-  const y = offsetY + isoY - tile.height * 4;
+  const y = offsetY + isoY;
 
   ctx.beginPath();
   ctx.moveTo(x, y);
@@ -42,24 +43,12 @@ export function renderTile(
   ctx.lineTo(x - TILE_WIDTH / 2, y + TILE_HEIGHT / 2);
   ctx.closePath();
 
-  ctx.fillStyle = biomeColors[tile.type];
+  ctx.fillStyle = biomeColors[tile.type] || biomeColors['grass'];
   ctx.fill();
 
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
   ctx.lineWidth = 0.5;
   ctx.stroke();
-
-  if (tile.height > 0) {
-    ctx.beginPath();
-    ctx.moveTo(x, y + TILE_HEIGHT);
-    ctx.lineTo(x - TILE_WIDTH / 2, y + TILE_HEIGHT / 2);
-    ctx.lineTo(x - TILE_WIDTH / 2, y + TILE_HEIGHT / 2 + tile.height * 4);
-    ctx.lineTo(x, y + TILE_HEIGHT + tile.height * 4);
-    ctx.closePath();
-    
-    ctx.fillStyle = adjustColor(biomeColors[tile.type], -30);
-    ctx.fill();
-  }
 
   if (tile.decoration) {
     drawDecoration(ctx, tile, x, y);
@@ -72,7 +61,7 @@ export function renderCreature(
   offsetX: number,
   offsetY: number,
   isSelected: boolean,
-  earAnimation: number = 0,
+  animationTime: number = 0,
   isWalletConnected: boolean = false
 ) {
   const { isoX, isoY } = cartesianToIsometric(creature.x, creature.y);
@@ -81,30 +70,49 @@ export function renderCreature(
 
   // Shadow
   ctx.beginPath();
-  ctx.ellipse(x, y + 12, 15, 8, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y + 12 - 20, 15, 8, 0, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
   ctx.fill();
 
-  const bobAmount = creature.state === 1 ? Math.sin(creature.frame * Math.PI * 2) * 2 : 0;
+  // Animation plus douce avec interpolation
+  const isMoving = creature.state === CreatureState.Walking;
+  // Réduit l'amplitude du rebond et utilise une fonction plus douce
+  const bobAmount = isMoving ? Math.sin(animationTime * 0.15) * 0.04 : 0;
 
   // Draw body with direction
-  drawPixelatedBody(ctx, x, y - 20 + bobAmount, creature.color, 32, 32, creature.direction);
+  drawPixelatedBody(
+    ctx,
+    x,
+    y - 20 + bobAmount,
+    creature.color,
+    32,
+    32,
+    creature.direction,
+    creature
+  );
   
   // Draw ears with direction and animation
-  drawPixelatedEars(ctx, x, y - 35 + bobAmount, creature.color, creature.direction, earAnimation, isWalletConnected);
+  drawPixelatedEars(ctx, x, y - 35 + bobAmount, creature.color, creature.direction, animationTime * 0.15, isWalletConnected);
 
   // Draw eyes based on direction
-  if (creature.direction !== 0) { // Don't draw eyes when facing back
+  if (creature.direction !== 0) {
     drawPixelatedEyes(ctx, x, y - 25 + bobAmount, creature.direction);
   }
 
-  // Draw legs with animation
-  drawPixelatedLegs(ctx, x, y - 10 + bobAmount, creature.state === 1 ? creature.frame : 0, creature.direction);
+  // Draw arms with animation and greeting
+  drawPixelatedArms(
+    ctx, 
+    x, 
+    y - 10 + bobAmount, 
+    isMoving ? animationTime * 0.15 : 0,
+    creature.direction,
+    creature.greetingType
+  );
 
   // Selection indicator
   if (isSelected) {
     ctx.beginPath();
-    ctx.ellipse(x, y, 25, 15, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y - 20, 25, 15, 0, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
     ctx.lineWidth = 2;
     ctx.stroke();
@@ -118,17 +126,35 @@ function drawPixelatedBody(
   color: string,
   width: number,
   height: number,
-  direction: number
+  direction: number,
+  creature: Creature
 ) {
   const pixelSize = 4;
-  ctx.fillStyle = color;
-  
-  // Body shape based on direction
   const bodyShape = getBodyShape(direction);
   
+  // Dessiner d'abord le corps de base
   bodyShape.forEach((row, i) => {
     row.forEach((pixel, j) => {
       if (pixel) {
+        let pixelColor = color;
+        
+        if (creature.pattern === 'striped') {
+          // Motif rayé horizontal
+          if (i % 4 < 2) {
+            pixelColor = adjustColor(color, -20);
+          }
+        } else if (creature.pattern === 'rainbow') {
+          // Code pour le pattern rainbow
+          const rainbowColors = ['#ff0000', '#ff7f00', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#9400d3'];
+          // On applique la couleur rainbow uniquement si le pixel fait partie du corps
+          if (pixel === 1) {
+            pixelColor = rainbowColors[Math.floor(Math.random() * rainbowColors.length)];
+          }
+        } else {
+          // Code pour le pattern default
+        }
+        
+        ctx.fillStyle = pixelColor;
         ctx.fillRect(
           x - width/2 + j * pixelSize,
           y + i * pixelSize,
@@ -138,6 +164,24 @@ function drawPixelatedBody(
       }
     });
   });
+
+  // Dessiner les pixels statiques sur le corps
+  if (creature.pixels) {
+    creature.pixels.forEach(pixel => {
+      // On vérifie si le pixel est dans les limites du corps
+      if (pixel.x >= 0 && pixel.x < bodyShape[0].length && 
+          pixel.y >= 0 && pixel.y < bodyShape.length && 
+          bodyShape[pixel.y][pixel.x] === 1) {
+        ctx.fillStyle = pixel.color;
+        ctx.fillRect(
+          x - width/2 + pixel.x * pixelSize,
+          y + pixel.y * pixelSize,
+          pixelSize,
+          pixelSize
+        );
+      }
+    });
+  }
 }
 
 function getBodyShape(direction: number): number[][] {
@@ -146,7 +190,7 @@ function getBodyShape(direction: number): number[][] {
   // 4: South (front view)
   // 6: West (left view)
   
-  const shapes = {
+  const shapes: Record<number, number[][]> = {
     // Front view (default)
     4: [
       [0,1,1,1,1,0],
@@ -194,7 +238,7 @@ function drawPixelatedEars(
   y: number,
   color: string,
   direction: number,
-  earAnimation: number = 0,
+  animationTime: number = 0,
   isWalletConnected: boolean = false
 ) {
   const pixelSize = 4;
@@ -283,7 +327,7 @@ function drawPixelatedEars(
   
   // Utiliser les oreilles spéciales si wallet connecté
   const ears = isWalletConnected ? earShapes.tall : (earShapes[direction as keyof typeof earShapes] || earShapes[4]);
-  const earOffset = Math.sin(earAnimation) * 2;
+  const earOffset = Math.sin(animationTime) * 2;
 
   if (isWalletConnected) {
     // Oreilles spéciales : centrées au-dessus des yeux
@@ -364,26 +408,53 @@ function drawPixelatedEyes(
   ctx.fillRect(x + 4 + pupilOffset * pixelSize, y + 2, pixelSize, pixelSize);
 }
 
-function drawPixelatedLegs(
+function drawPixelatedArms(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  frame: number,
-  direction: number
+  animationTime: number,
+  direction: number,
+  greetingType: 'none' | 'salutx1' | 'salutx2' = 'none'
 ) {
+  console.log('drawPixelatedArms appelé avec greetingType:', greetingType);
   const pixelSize = 4;
   ctx.fillStyle = '#000000';
   
-  const legSpacing = 10;
-  const legOffset = Math.sin(frame * Math.PI * 2) * 4;
+  const armSpacing = 10;
+  const baseY = y;
   
-  // Front legs
-  ctx.fillRect(x - legSpacing, y + legOffset, pixelSize, pixelSize * 3);
-  ctx.fillRect(x + legSpacing - pixelSize, y - legOffset, pixelSize, pixelSize * 3);
+  // Animation de salutation
+  let leftArmAngle = 0;
+  let rightArmAngle = 0;
   
-  // Back legs
-  ctx.fillRect(x - legSpacing, y - legOffset, pixelSize, pixelSize * 3);
-  ctx.fillRect(x + legSpacing - pixelSize, y + legOffset, pixelSize, pixelSize * 3);
+  if (greetingType === 'salutx1') {
+    // Un seul bras qui salue
+    rightArmAngle = Math.sin(animationTime * 4) * Math.PI / 2; // Augmentation de l'amplitude et de la vitesse
+    console.log('Animation salutx1, angle:', rightArmAngle);
+  } else if (greetingType === 'salutx2') {
+    // Les deux bras qui saluent
+    leftArmAngle = Math.sin(animationTime * 4) * Math.PI / 2; // Augmentation de l'amplitude et de la vitesse
+    rightArmAngle = Math.sin(animationTime * 4) * Math.PI / 2;
+    console.log('Animation salutx2, angles:', leftArmAngle, rightArmAngle);
+  } else {
+    // Animation normale de marche
+    const armOffset = Math.sin(animationTime) * 0.5;
+    leftArmAngle = armOffset;
+    rightArmAngle = -armOffset;
+  }
+
+  // Fonction pour dessiner un bras avec rotation
+  const drawArm = (startX: number, startY: number, angle: number) => {
+    ctx.save();
+    ctx.translate(startX, startY);
+    ctx.rotate(angle);
+    ctx.fillRect(0, 0, pixelSize, pixelSize * 3);
+    ctx.restore();
+  };
+
+  // Dessiner les bras
+  drawArm(x - armSpacing, baseY, leftArmAngle);
+  drawArm(x + armSpacing - pixelSize, baseY, rightArmAngle);
 }
 
 function drawTools(
@@ -430,10 +501,9 @@ function isPartOfBodyShape(x: number, y: number): boolean {
 
 function adjustColor(color: string, amount: number): string {
   const hex = color.replace('#', '');
-  const r = Math.max(0, Math.min(255, parseInt(hex.substring(0, 2), 16) + amount));
-  const g = Math.max(0, Math.min(255, parseInt(hex.substring(2, 4), 16) + amount));
-  const b = Math.max(0, Math.min(255, parseInt(hex.substring(4, 6), 16) + amount));
-  
+  const r = Math.max(0, Math.min(255, parseInt(hex.substr(0, 2), 16) + amount));
+  const g = Math.max(0, Math.min(255, parseInt(hex.substr(2, 2), 16) + amount));
+  const b = Math.max(0, Math.min(255, parseInt(hex.substr(4, 2), 16) + amount));
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
