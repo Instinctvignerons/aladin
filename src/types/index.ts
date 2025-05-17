@@ -16,6 +16,8 @@ export interface Tile {
   height: number;
   decoration?: Decoration;
   ownerId?: string; // Wallet address of the tile owner
+  hasFence?: boolean; // New property for fences
+  fenceType?: FenceType; // Type of fence if present
 }
 
 export interface CreaturePixel {
@@ -45,12 +47,19 @@ export interface Creature {
   height: number;
   interactions?: CreatureInteraction[];
   happiness: number;
-  vitality: number; // New vitality gauge (0-100)
-  ownerId: string; // Wallet address of the owner
-  emotionalState: EmotionalState; // Current emotional state
-  lastFed: number; // Timestamp of last feeding
-  isPlaying: boolean; // Whether the creature is currently playing
-  playingWith?: string; // ID of creature it's playing with
+  vitality: number;
+  ownerId: string;
+  emotionalState: EmotionalState;
+  lastFed: number;
+  isPlaying: boolean;
+  playingWith?: string;
+}
+
+export enum FenceType {
+  Wooden = 'wooden',
+  Floral = 'floral',
+  Crystal = 'crystal',
+  Rainbow = 'rainbow'
 }
 
 export enum EmotionalState {
@@ -143,9 +152,10 @@ export interface WorldState {
 }
 
 export interface PrivateGarden {
-  ownerId: string; // Wallet address
-  tiles: Point[]; // Array of tile coordinates that belong to this garden
+  ownerId: string;
+  tiles: Point[];
   createdAt: number;
+  fenceType?: FenceType;
 }
 
 export interface GameContextType {
@@ -174,7 +184,7 @@ export interface Food {
     pattern?: CreaturePattern;
     evolution?: number;
     happiness: number;
-    vitality: number; // Amount of vitality restored
+    vitality: number;
   };
 }
 
@@ -182,7 +192,7 @@ export interface CreatureInteraction {
   type: 'feed' | 'play' | 'bathe';
   food?: FoodType;
   timestamp: number;
-  withCreatureId?: string; // For play interactions
+  withCreatureId?: string;
 }
 
 export interface GardenClaim {
@@ -191,4 +201,5 @@ export interface GardenClaim {
   startY: number;
   width: number;
   height: number;
+  fenceType?: FenceType;
 }
