@@ -15,6 +15,7 @@ export interface Tile {
   y: number;
   height: number;
   decoration?: Decoration;
+  ownerId?: string; // Wallet address of the tile owner
 }
 
 export interface CreaturePixel {
@@ -44,6 +45,18 @@ export interface Creature {
   height: number;
   interactions?: CreatureInteraction[];
   happiness: number;
+  vitality: number; // New vitality gauge (0-100)
+  ownerId: string; // Wallet address of the owner
+  emotionalState: EmotionalState; // Current emotional state
+  lastFed: number; // Timestamp of last feeding
+  isPlaying: boolean; // Whether the creature is currently playing
+  playingWith?: string; // ID of creature it's playing with
+}
+
+export enum EmotionalState {
+  Happy = 'happy',
+  Sad = 'sad',
+  Sick = 'sick'
 }
 
 export enum Direction {
@@ -62,6 +75,9 @@ export enum CreatureState {
   Walking,
   Grouping,
   Separating,
+  Playing,
+  Bathing,
+  Eating
 }
 
 export enum BiomeType {
@@ -121,8 +137,15 @@ export interface WorldState {
   creatures: Creature[];
   evolutionLevel: number;
   connections: number;
-  fountains: Array<{ x: number; y: number }>;
+  fountains: Array<{ x: number; y: number; state: number }>;
   pinkTrees: Array<{ x: number; y: number }>;
+  privateGardens: PrivateGarden[];
+}
+
+export interface PrivateGarden {
+  ownerId: string; // Wallet address
+  tiles: Point[]; // Array of tile coordinates that belong to this garden
+  createdAt: number;
 }
 
 export interface GameContextType {
@@ -135,7 +158,7 @@ export interface GameContextType {
 export interface Fountain {
   x: number;
   y: number;
-  state: 1 | 2 | 3 | 4; // 1: normal, 2: plus d'eau, 3: encore plus d'eau, 4: débordement
+  state: 1 | 2 | 3 | 4;
 }
 
 export type CreaturePattern = 'default' | 'striped' | 'rainbow';
@@ -151,11 +174,21 @@ export interface Food {
     pattern?: CreaturePattern;
     evolution?: number;
     happiness: number;
+    vitality: number; // Amount of vitality restored
   };
 }
 
 export interface CreatureInteraction {
-  type: 'feed';
-  food: FoodType;
+  type: 'feed' | 'play' | 'bathe';
+  food?: FoodType;
   timestamp: number;
+  withCreatureId?: string; // For play interactions
+}
+
+export interface GardenClaim {
+  ownerId: string;
+  startX: number;
+  startY: number;
+  width: number;
+  height: number;
 }
