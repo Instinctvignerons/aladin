@@ -1,17 +1,25 @@
 // Serveur WebSocket pour monde partagé de créatures
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
+const ethers = require('ethers');
 
 const wss = new WebSocket.Server({ port: 3001 });
 
 // --- État du monde partagé ---
 const world = {
-  creatures: [], // Liste des créatures
-  tiles: [],    // Liste des tuiles
-  messages: [], // Liste des messages utilisateurs
-  fountains: [], // Liste des fontaines
-  pinkTrees: [], // Liste des arbres roses
+  creatures: [],
+  tiles: [],
+  messages: [],
+  fountains: [],
+  pinkTrees: [],
+  privateGardens: [],
 };
+
+// Constantes
+const VITALITY_DECAY_RATE = 1; // Points de vitalité perdus par minute
+const VITALITY_CHECK_INTERVAL = 60000; // Vérification toutes les minutes
+const MIN_GARDEN_SIZE = 8;
+const MAX_GARDEN_SIZE = 26;
 
 // --- Création initiale des tuiles ---
 const ISLAND_RADIUS = 20;
@@ -29,8 +37,58 @@ for (let x = -ISLAND_RADIUS; x <= ISLAND_RADIUS; x++) {
   }
 }
 
-// --- Création initiale des créatures ---
-const CREATURE_COUNT = 5;
+// Vérification de la signature du wallet
+function verifySignature(message, signature, address) {
+  try {
+    const signerAddr = ethers.verifyMessage(message, signature);
+    return signerAddr.toLowerCase() === address.toLowerCase();
+  } catch (e) {
+    console.error('Erreur de vérification de signature:', e);
+    return false;
+  }
+}
+
+// Mise à jour de la vitalité des créatures
+setInterval(() => {
+  world.creatures.forEach(creature => {
+    // Diminuer la vitalité
+    creature.vitality = Math.max(0, creature.vitality - VITALITY_DECAY_RATE);
+    
+    // Mettre à jour l'état émotionnel
+    if (creature.vitality >= 50) {
+      creature.emotionalState = 'happy';
+    } else if (creature.vitality >= 25) {
+      creature.emotionalState = 'sad';
+    } else {
+      creature.emotionalState = 'sick';
+    }
+  });
+  
+  broadcastWorld();
+}, VITALITY_CHECK_INTERVAL);
+
+// Vérifier si une zone est disponible pour un jardin
+function isAreaAvailable(startX, startY, width, height) {
+  // Vérifier les limites de l'île
+  const maxDistance = ISLAND_RADIUS - Math.max(width, height) / 2;
+  const centerDistance = Math.sqrt(startX * startX + startY * startY);
+  if (centerDistance > maxDistance) return false;
+
+  // Vérifier le chevauchement avec d'autres jardins
+  return !world.privateGardens.some(garden => {
+    const gardenBounds = {
+      minX: Math.min(...garden.tiles.map(t => t.x)),
+      maxX: Math.max(...garden.tiles.map(t => t.x)),
+      minY: Math.min(...garden.tiles.map(t => t.y)),
+      maxY: Math.max(...garden.tiles.map(t => t.y))
+    };
+
+    return !(startX + width < gardenBounds.minX ||
+             startX > gardenBounds.maxX ||
+             startY + height < gardenBounds.minY ||
+             startY > gardenBounds.maxY);
+  });
+}
 
 function randomInRange(min, max) {
   return Math.random() * (max - min) + min;
@@ -52,43 +110,31 @@ function generateRandomColor() {
   return colors[Math.floor(Math.random() * colors.length)];
 }
 
-function createCreature() {
+// Créer une créature avec vitalité initiale
+function createCreature(ownerId) {
   const angle = Math.random() * Math.PI * 2;
   const distance = randomInRange(2, ISLAND_RADIUS - 2);
   const x = Math.cos(angle) * distance;
   const y = Math.sin(angle) * distance;
-  const patterns = ['default', 'striped'];
-  const pattern = patterns[Math.floor(Math.random() * patterns.length)];
   
-  // Générer des pixels aléatoires pour le corps
-  const pixels = [];
-  const numPixels = Math.floor(Math.random() * 5) + 3; // Entre 3 et 7 pixels
-  for (let i = 0; i < numPixels; i++) {
-    pixels.push({
-      x: Math.floor(Math.random() * 8), // 8 positions possibles en x
-      y: Math.floor(Math.random() * 8), // 8 positions possibles en y
-      color: generateRandomColor() // Couleur aléatoire pour chaque pixel
-    });
-  }
-
   return {
     id: uuidv4(),
     x,
     y,
     targetX: x,
     targetY: y,
-    state: 0, // Idle
+    state: 0,
     direction: Math.floor(Math.random() * 8),
     animation: {},
     bubble: '',
     color: generateRandomColor(),
-    pattern,
-    pixels // Ajouter les pixels au corps de la créature
+    pattern: 'default',
+    vitality: 100,
+    emotionalState: 'happy',
+    ownerId,
+    lastFed: Date.now(),
+    isPlaying: false
   };
-}
-
-for (let i = 0; i < CREATURE_COUNT; i++) {
-  world.creatures.push(createCreature());
 }
 
 // --- Boucle d'update (comportement autonome) ---
@@ -126,9 +172,7 @@ setInterval(() => {
         creature.state = 0; // Idle
       }
     }
-    // TODO : interactions sociales, animations expressives, etc.
   }
-  // Diffuser l'état à tous les clients
   broadcastWorld();
 }, 100);
 
@@ -141,7 +185,8 @@ function broadcastWorld() {
       tiles: world.tiles, 
       messages: world.messages,
       fountains: world.fountains,
-      pinkTrees: world.pinkTrees
+      pinkTrees: world.pinkTrees,
+      privateGardens: world.privateGardens
     } 
   });
   wss.clients.forEach(client => {
@@ -152,12 +197,12 @@ function broadcastWorld() {
 }
 
 wss.on('connection', ws => {
-  // Envoyer l'état initial
   console.log("world envoyé au client :", { 
     creatures: world.creatures, 
     tiles: world.tiles,
     fountains: world.fountains,
-    pinkTrees: world.pinkTrees
+    pinkTrees: world.pinkTrees,
+    privateGardens: world.privateGardens
   });
   ws.send(JSON.stringify({ 
     type: 'worldUpdate', 
@@ -165,7 +210,8 @@ wss.on('connection', ws => {
       creatures: world.creatures, 
       tiles: world.tiles,
       fountains: world.fountains,
-      pinkTrees: world.pinkTrees
+      pinkTrees: world.pinkTrees,
+      privateGardens: world.privateGardens
     } 
   }));
 
@@ -181,76 +227,173 @@ wss.on('connection', ws => {
   });
 });
 
-// --- Gestion des commandes admin ---
+// Gérer les commandes
 function handleCommand(cmd) {
   switch (cmd.action) {
+    case 'claimGarden':
+      if (!verifySignature(cmd.message, cmd.signature, cmd.ownerId)) {
+        return;
+      }
+      
+      if (cmd.width < MIN_GARDEN_SIZE || cmd.width > MAX_GARDEN_SIZE ||
+          cmd.height < MIN_GARDEN_SIZE || cmd.height > MAX_GARDEN_SIZE) {
+        return;
+      }
+
+      if (!isAreaAvailable(cmd.startX, cmd.startY, cmd.width, cmd.height)) {
+        return;
+      }
+
+      const gardenTiles = [];
+      for (let x = cmd.startX; x < cmd.startX + cmd.width; x++) {
+        for (let y = cmd.startY; y < cmd.startY + cmd.height; y++) {
+          gardenTiles.push({ x, y });
+        }
+      }
+
+      world.privateGardens.push({
+        ownerId: cmd.ownerId,
+        tiles: gardenTiles,
+        createdAt: Date.now()
+      });
+      break;
+
+    case 'feedCreature':
+      const creature = world.creatures.find(c => c.id === cmd.creatureId);
+      if (!creature || creature.ownerId !== cmd.ownerId) return;
+
+      const food = {
+        apple: 30,
+        yellowflower: 20,
+        pinkflower: 25,
+        rainbowflower: 40
+      }[cmd.foodType] || 0;
+
+      creature.vitality = Math.min(100, creature.vitality + food);
+      creature.lastFed = Date.now();
+      creature.state = 6; // Eating
+      setTimeout(() => {
+        creature.state = 0; // Back to Idle
+      }, 2000);
+      break;
+
+    case 'batheCreature':
+      const bathingCreature = world.creatures.find(c => c.id === cmd.creatureId);
+      if (!bathingCreature || bathingCreature.ownerId !== cmd.ownerId) return;
+
+      // Vérifier si la créature est près d'une fontaine
+      const nearbyFountain = world.fountains.find(f => {
+        const dx = f.x - bathingCreature.x;
+        const dy = f.y - bathingCreature.y;
+        return Math.sqrt(dx * dx + dy * dy) < 2;
+      });
+
+      if (nearbyFountain) {
+        bathingCreature.state = 5; // Bathing
+        setTimeout(() => {
+          bathingCreature.state = 0; // Back to Idle
+        }, 3000);
+      }
+      break;
+
+    case 'playWithCreature':
+      const playingCreature = world.creatures.find(c => c.id === cmd.creatureId);
+      const targetCreature = world.creatures.find(c => c.id === cmd.targetCreatureId);
+      
+      if (!playingCreature || !targetCreature) return;
+
+      const dx = targetCreature.x - playingCreature.x;
+      const dy = targetCreature.y - playingCreature.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance < 3) {
+        playingCreature.isPlaying = true;
+        playingCreature.playingWith = targetCreature.id;
+        playingCreature.state = 4; // Playing
+        
+        targetCreature.isPlaying = true;
+        targetCreature.playingWith = playingCreature.id;
+        targetCreature.state = 4;
+
+        // Augmenter légèrement la vitalité pendant le jeu
+        playingCreature.vitality = Math.min(100, playingCreature.vitality + 5);
+        targetCreature.vitality = Math.min(100, targetCreature.vitality + 5);
+
+        setTimeout(() => {
+          playingCreature.isPlaying = false;
+          playingCreature.playingWith = undefined;
+          playingCreature.state = 0;
+          
+          targetCreature.isPlaying = false;
+          targetCreature.playingWith = undefined;
+          targetCreature.state = 0;
+        }, 5000);
+      }
+      break;
+
     case 'addFountain':
       world.fountains.push({ x: cmd.x, y: cmd.y, state: 1 });
-      broadcastWorld();
       break;
     case 'removeFountain':
       world.fountains = world.fountains.filter((_, index) => index !== cmd.fountainIndex);
-      broadcastWorld();
       break;
     case 'changeFountainState':
       const fountain = world.fountains[cmd.fountainIndex];
       if (fountain) {
         fountain.state = Math.min(4, fountain.state + 1);
-        broadcastWorld();
       }
       break;
     case 'addPinkTree':
       world.pinkTrees.push({ x: cmd.x, y: cmd.y });
-      broadcastWorld();
       break;
     case 'removePinkTree':
       world.pinkTrees = world.pinkTrees.filter((_, index) => index !== cmd.treeIndex);
-      broadcastWorld();
       break;
     case 'mintCreature':
-      const newCreature = createCreature();
+      const newCreature = createCreature(cmd.ownerId);
       world.creatures.push(newCreature);
-      broadcastWorld();
       break;
     default:
-      const creature = world.creatures.find(c => c.id === cmd.creatureId);
-      if (!creature) return;
+      const targetCreature = world.creatures.find(c => c.id === cmd.creatureId);
+      if (!targetCreature) return;
       switch (cmd.action) {
         case 'moveTo':
-          creature.targetX = cmd.x;
-          creature.targetY = cmd.y;
-          creature.state = 1; // Walking
+          targetCreature.targetX = cmd.x;
+          targetCreature.targetY = cmd.y;
+          targetCreature.state = 1; // Walking
           break;
         case 'jump':
-          creature.animation.jump = true;
-          setTimeout(() => { creature.animation.jump = false; }, 500);
+          targetCreature.animation.jump = true;
+          setTimeout(() => { targetCreature.animation.jump = false; }, 500);
           break;
         case 'salute':
-          creature.state = 2; // Saluting
-          setTimeout(() => { creature.state = 0; }, 1000); // Back to Idle
+          targetCreature.state = 2; // Saluting
+          setTimeout(() => { targetCreature.state = 0; }, 1000);
           break;
         case 'dance':
-          creature.state = 3; // Dancing
-          setTimeout(() => { creature.state = 0; }, 2000); // Back to Idle
+          targetCreature.state = 3; // Dancing
+          setTimeout(() => { targetCreature.state = 0; }, 2000);
           break;
         case 'sleep':
-          creature.state = 4; // Sleeping
-          setTimeout(() => { creature.state = 0; }, 5000); // Back to Idle
+          targetCreature.state = 4; // Sleeping
+          setTimeout(() => { targetCreature.state = 0; }, 5000);
           break;
         case 'changeColor':
-          creature.color = cmd.color || '#ff9f43';
+          targetCreature.color = cmd.color || '#ff9f43';
           break;
         case 'setDirection':
           if (cmd.direction >= 0 && cmd.direction <= 7) {
-            creature.direction = cmd.direction;
+            targetCreature.direction = cmd.direction;
           }
           break;
         case 'setBubble':
-          creature.bubble = cmd.text || '';
-          setTimeout(() => { creature.bubble = ''; }, 3000);
+          targetCreature.bubble = cmd.text || '';
+          setTimeout(() => { targetCreature.bubble = ''; }, 3000);
           break;
       }
   }
+  
+  broadcastWorld();
 }
 
-console.log('Serveur WebSocket démarré sur ws://localhost:3001'); 
+console.log('Serveur WebSocket démarré sur ws://localhost:3001');
